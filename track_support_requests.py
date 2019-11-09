@@ -42,6 +42,41 @@ class SupportTracker:
             messages += new_messages
 
         return pd.DataFrame(messages)
+    
+    def get_users_df(self) -> list:
+        users_list = self.client.users.list().body['members']
+        users = [
+            {'id': user['id'], 
+             'handle': user['name'],
+             'real_name': user['profile']['real_name_normalized'],
+             'is_bot': user['is_bot']
+             } 
+            for user in users_list
+        ]
+        return pd.DataFrame(users)
+    
+    def get_thread(self, url: str) -> list:
+        thread_ts = self._extract_thread_ts(url)
+        if thread_ts:
+            channel = self._extract_channel(url)
+            res = self.client.channels.replies(channel, thread_ts)        
+            channel_msg = res.body['messages'][0]
+            last_msg_ts = datetime.fromtimestamp(int(float(channel_msg['latest_reply'])))
+            asker_id = channel_msg['user']
+            ask_ts = datetime.fromtimestamp(int(float(channel_msg['ts'])))
+            responder_id, respond_ts = self._get_respond(channel_msg['replies'], asker_id)
+            return [asker_id, ask_ts, responder_id, respond_ts, last_msg_ts]
+        else:
+            return [None]*5
+    
+    def _extract_channel(self, url: str) -> str:
+        return url.split("/")[4]
+    
+    def _extract_thread_ts(self, url: str) -> str:
+        try:
+            return url.split("?thread_ts=")[1]
+        except IndexError:
+            return None
 
     def _get_some_messages(self, query: str, page_num: int) -> list:
         """Get and parse one page of messages matching a query"""
@@ -57,7 +92,8 @@ class SupportTracker:
         last_page = res.body['messages']['pagination']['page_count']
         messages = [
             {
-                'asker_handle': msg['username'],
+                'mentioner_id': msg['user'],
+                'mentioner_handle': msg['username'],
                 'timestamp': datetime.fromtimestamp(int(float(msg['ts']))),
                 'msg_text': msg['text'],
                 'slack_link': msg['permalink']
@@ -67,6 +103,12 @@ class SupportTracker:
         ]
 
         return this_page, last_page, messages
+    
+    def _get_respond(self, replies: list, asker_id: str) -> list:
+        for reply in replies:
+            if reply['user']!=asker_id:
+                return reply['user'], datetime.fromtimestamp(int(float(reply['ts'])))
+        return None, None
 
     def _get_usergroup_id(self, handle: str) -> str:
         """Get the ID of the support handle"""
@@ -75,8 +117,36 @@ class SupportTracker:
             for usergroup in self.client.usergroups.list().body['usergroups']
             if usergroup['handle'] == handle
         ][0]
+        
+def get_name(df, id_col, users_df):
+    df = df.merge(users_df[['id','real_name']], how='left', left_on=id_col, right_on='id').rename(columns={'real_name': id_col.replace("id","name")})
+    df = df.drop(axis=1, columns=[id_col, 'id'])
+    return df
+
+def run_slack_tracker(support_handle, min_date=None, max_date=None, output_path='./support_requests.csv'):
+    st = SupportTracker()
+    message_df = st.get_messages(support_handle)
+    if min_date:
+        message_df = message_df[message_df['timestamp']>=pd.to_datetime(min_date)]
+    if max_date:
+        message_df = message_df[message_df['timestamp']<=pd.to_datetime(max_date)]
+    message_df = message_df.sort_values(by='timestamp')
+    message_df['thread_ts'] = message_df['slack_link'].apply(st._extract_thread_ts)
+    message_df = message_df[(~message_df['thread_ts'].duplicated()) | (message_df['thread_ts'].isnull())]
+    message_df = message_df.dropna(subset=['mentioner_id']) # this will drop workflow bot
+    thread_res = message_df['slack_link'].apply(st.get_thread)
+    message_df[['asker_id','ask_ts','responder_id','respond_ts','last_msg_ts']] = pd.DataFrame(thread_res.to_list(),index=thread_res.index)
+    
+    users_df = st.get_users_df()
+    message_df = get_name(message_df, "mentioner_id", users_df)
+    message_df = get_name(message_df, "asker_id", users_df)
+    message_df = get_name(message_df, "responder_id", users_df)
+
+    message_df[sorted(message_df.columns)].to_csv(output_path, index=False)
+    
 
 
+    
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Save support request information to CSV. Your Slack token '
@@ -93,10 +163,18 @@ if __name__ == "__main__":
         help='Path to save a CSV of support request information',
         default='./support_requests.csv'
     )
+    parser.add_argument(
+        '--min_date',
+        help='Earliest date to return message, in format yyyy-mm-dd',
+        default=None
+    )
+    parser.add_argument(
+        '--max_date',
+        help='Latest date to return message, in format yyyy-mm-dd',
+        default=None
+    )
     args = parser.parse_args()
 
     assert args.support_handle, 'Must provide the --support_handle arg'
-
-    st = SupportTracker()
-    message_df = st.get_messages(args.support_handle)
-    message_df.to_csv(args.output_path, index=False)
+    
+    run_slack_tracker(args.support_handle, args.output_path, args.min_date, args.max_date)
