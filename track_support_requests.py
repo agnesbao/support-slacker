@@ -125,11 +125,13 @@ def get_name(df, id_col, users_df):
 
 def run_slack_tracker(support_handle, min_date=None, max_date=None, output_path='./support_requests.csv'):
     st = SupportTracker()
+    print("Getting messages with support handle...")
     message_df = st.get_messages(support_handle)
     if min_date:
         message_df = message_df[message_df['timestamp']>=pd.to_datetime(min_date)]
     if max_date:
         message_df = message_df[message_df['timestamp']<=pd.to_datetime(max_date)]
+    print("Getting thread of messages...")
     message_df = message_df.sort_values(by='timestamp')
     message_df['thread_ts'] = message_df['slack_link'].apply(st._extract_thread_ts)
     message_df = message_df[(~message_df['thread_ts'].duplicated()) | (message_df['thread_ts'].isnull())]
@@ -142,6 +144,7 @@ def run_slack_tracker(support_handle, min_date=None, max_date=None, output_path=
     message_df = get_name(message_df, "asker_id", users_df)
     message_df = get_name(message_df, "responder_id", users_df)
 
+    print("Saving csv to", output_path)
     message_df[sorted(message_df.columns)].to_csv(output_path, index=False)
     
 
@@ -177,4 +180,4 @@ if __name__ == "__main__":
 
     assert args.support_handle, 'Must provide the --support_handle arg'
     
-    run_slack_tracker(args.support_handle, args.output_path, args.min_date, args.max_date)
+    run_slack_tracker(args.support_handle, args.min_date, args.max_date, args.output_path)
