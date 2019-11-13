@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Tue Nov  5 15:13:09 2019
-
-@author: abao
+To reformat the output of track_support_request.py for platform-ds tracking sheet.
+General users can ignore it.
 """
 
 from datetime import datetime
