@@ -8,5 +8,5 @@ python track_support_requests.py --help
 ```
 ## Example
 ```bash
-python track_support_requests.py --support_handle uptakeio-support --min_date 2019-11-08
+python track_support_requests.py --support_handle {SLACK-HANDLE} --min_date 2019-11-08
 ```
