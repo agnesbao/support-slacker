@@ -62,7 +62,10 @@ class SupportTracker:
             res = self.client.channels.replies(channel, thread_ts)        
             channel_msg = res.body['messages'][0]
             last_msg_ts = datetime.fromtimestamp(int(float(channel_msg['latest_reply'])))
-            asker_id = channel_msg['user']
+            try:
+                asker_id = channel_msg['user']
+            except KeyError:
+                asker_id = channel_msg['bot_id']
             ask_ts = datetime.fromtimestamp(int(float(channel_msg['ts'])))
             responder_id, respond_ts = self._get_respond(channel_msg['replies'], asker_id)
             return [asker_id, ask_ts, responder_id, respond_ts, last_msg_ts]
@@ -144,7 +147,7 @@ def run_slack_tracker(support_handle, min_date=None, max_date=None, output_path=
     message_df = get_name(message_df, "asker_id", users_df)
     message_df = get_name(message_df, "responder_id", users_df)
 
-    print("Saving csv to", output_path)
+    print("Saving csv to", os.path.abspath(output_path))
     message_df[sorted(message_df.columns)].to_csv(output_path, index=False)
     
 
